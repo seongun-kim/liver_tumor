@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=3,4 python -m scripts.eval \
-    --data_dir ./datasets/L03_T05 \
-    --model_dir ./models/resnet50/epoch_09.pt \
+CUDA_VISIBLE_DEVICES=6,7 python -m scripts.eval \
+    --data_dir /data2/seongun/data/liver_tumor/datasets/L00_T20_V01 \
+    --model_dir ./models/v2/transformed_v1/best_model.pt \
     --batch_size 128

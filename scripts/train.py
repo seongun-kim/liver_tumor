@@ -1,5 +1,6 @@
 import os
 import argparse
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -27,10 +28,20 @@ args = parser.parse_args()
 
 
 if __name__ == '__main__':
+    # Set seed
+    seed = 0
+    seed = int(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
     resume = False
     device = 'cuda'
     os.makedirs(args.save_dir, exist_ok=True)
 
+    # Model
     model = ResNet50(in_channels=1, num_classes=2)
     checkpoint = torch.load(args.model_dir)['net']
 
@@ -42,10 +53,18 @@ if __name__ == '__main__':
     model.to(device)
     model = torch.nn.DataParallel(model)
 
+    
+    # Dataset
+    height, width = 512, 512
+    diagonal = int((height ** 2 + width ** 2) ** 0.5)
+    padding = (diagonal - height) // 2, (diagonal - width) // 2
+
     transforms = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Resize((224, 224), antialias=True),
-        transforms.Normalize(mean=[.5], std=[.5]),
+        # transforms.Pad(padding),
+        transforms.RandomRotation(90, expand=False),
+        transforms.Resize((224, 224), antialias=False),
+        # transforms.Normalize(mean=[.5], std=[.5]),
     ])
 
     dataset = LiverTumorDataset(data_dir=args.data_dir, transform=transforms)
@@ -60,6 +79,7 @@ if __name__ == '__main__':
 
     num_data = len(dataset)
     num_train = int(num_data * 0.7)
+    # num_train = int(num_data * 0.1)
     num_test = num_data - num_train
 
     train_dataset, test_dataset = torch.utils.data.random_split(dataset, [num_train, num_test])
@@ -69,7 +89,7 @@ if __name__ == '__main__':
 
     # optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=1e-4)
     optimizer = torch.optim.Adam(
-        model.parameters(), lr=2e-4,
+        model.parameters(), lr=1e-4,
     )
 
     # Train
@@ -81,7 +101,7 @@ if __name__ == '__main__':
             data, label = data.to(device).float(), label.to(device)
             optimizer.zero_grad()
             pred = model(data)
-            loss = F.nll_loss(pred, label, reduction='sum')
+            loss = F.nll_loss(pred, label, reduction='mean')
             loss.backward()
             optimizer.step()
             train_loss += loss
@@ -103,7 +123,7 @@ if __name__ == '__main__':
 
         print(f'epoch: {epoch} - loss: {test_loss} - accuracy: {correct / len(test_loader.dataset)}\n')
 
-        if ((epoch + 1) % 5) == 0:
+        if ((epoch + 1) % 10) == 0:
             torch.save(model.state_dict(), os.path.join(args.save_dir, f'epoch_{epoch:02d}.pt'))
         if train_loss <= best_loss:
             best_loss = train_loss

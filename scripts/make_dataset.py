@@ -2,6 +2,7 @@ import os
 import glob
 import shutil
 import argparse
+import copy
 from tqdm import tqdm
 
 import numpy as np 
@@ -35,10 +36,41 @@ def normalize(scan):
     return (scan - mins) / (maxs - mins)
 
 
+def flip(scan):
+    return scan * -1 + 1.
+
+
+def highlight(scan):
+    # Highlight 0.5 and zero out 0 and 1
+
+    # [0, 1] -> [-1, 1]
+    scan = scan * 2 - 1.
+
+    # [-1, 1] -> [0, 1]
+    scan = np.abs(scan)
+
+    # [0, 1] -> [0, -1]
+    scan = scan - 1.
+
+    # [0, -1] -> [0, 1]
+    scan = scan * -1
+
+    return scan
+
+
+def windowed(scan, w=150, l=30):
+    px = scan
+    px_min = l - w // 2
+    px_max = l + w // 2
+    px[px < px_min] = px_min
+    px[px > px_max] = px_max
+    return (px - px_min) / (px_max - px_min)
+
+
 # Main function
 def main(args):
     # Create save directory
-    save_dir = f'{args.save_dir}/L{int(args.ratio_liver*100):02d}_T{int(args.ratio_tumor*100):02d}'
+    save_dir = f'{args.save_dir}/L{int(args.ratio_liver*100):02d}_T{int(args.ratio_tumor*100):02d}_W'
     if os.path.exists(save_dir):
         confirm = input(f"'{save_dir}' already exists. Are you sure you want to delete '{save_dir}'? (y/n): ")
         if confirm.lower() == 'y':
@@ -47,6 +79,7 @@ def main(args):
 
     # Initialize lists to store CT scans and labels
     sample_cts = []
+    sample_w_cts = []
     sample_masks = []
     tumors = []
 
@@ -59,7 +92,9 @@ def main(args):
             mask_file = os.path.join(args.data_dir, f'segmentations/segmentation-{nii_idx}.nii')
 
             # Read and normalize CT scan
-            sample_ct = normalize(read_nii(ct_file))
+            sample_ct = read_nii(ct_file)
+            sample_w_ct = windowed(copy.deepcopy(sample_ct))
+            sample_ct = normalize(sample_ct)
             sample_mask = read_nii(mask_file)
 
             # print(f'\nct-{nii_idx}')
@@ -67,7 +102,8 @@ def main(args):
             # print(f'max: {sample_ct.max()}\nmin: {sample_ct.min()}')
 
             # Loop over all slices in the CT scan
-            for slice_idx in tqdm(range(len(sample_ct)), desc='Processing slices in CT scan', position=2, leave=False):
+            # for slice_idx in tqdm(range(len(sample_ct)), desc='Processing slices in CT scan', position=2, leave=False):
+            for slice_idx in range(len(sample_ct)):
                 height, width = sample_mask[slice_idx].shape
                 num_pixels = height * width
                 num_background = (sample_mask[slice_idx] == 0.).sum()
@@ -76,22 +112,27 @@ def main(args):
                 num_liver = num_normal + num_tumor
 
                 # Ignore a CT scan sample if there is no liver
-                if num_liver == 0:
-                    continue
+                # if num_liver == 0:
+                #     continue
 
                 ratio_liver = num_liver / num_pixels
-                ratio_tumor = num_tumor / num_liver
+                ratio_tumor = num_tumor / num_liver if num_liver != 0 else 0
 
                 # Save CT samples if liver takes at least {args.ratio_liver*100}% of pixels
-                if ratio_liver >= args.ratio_liver:
+                # if ratio_liver >= args.ratio_liver:
+                if True:
                     # Consider a CT sample as a tumor if there exists at least {args.ratio_tumor*100}% of tumor inside the liver
-                    if ratio_tumor >= args.ratio_tumor:
+                    # if ratio_tumor >= args.ratio_tumor:
+                    if (ratio_liver >= 0.03) and (ratio_tumor >= args.ratio_tumor):
                         sample_cts.append(sample_ct[slice_idx])
+                        sample_w_cts.append(sample_w_ct[slice_idx])
                         sample_masks.append(sample_mask[slice_idx])
                         tumors.append(1.)
                     # Consider a sample as normal if there is no tumor inside the liver
-                    elif num_tumor == 0:
+                    # elif num_tumor == 0:
+                    elif (num_tumor == 0) and (num_liver == 0):
                         sample_cts.append(sample_ct[slice_idx])
+                        sample_w_cts.append(sample_w_ct[slice_idx])
                         sample_masks.append(sample_mask[slice_idx])
                         tumors.append(0.)
 
@@ -118,6 +159,10 @@ def main(args):
     np.savez_compressed(
         os.path.join(save_dir, 'samples'),
         samples=np.array(sample_cts),
+    )
+    np.savez_compressed(
+        os.path.join(save_dir, 'windowed_samples'),
+        windowed_samples=np.array(sample_w_cts),
     )
     np.savez_compressed(
         os.path.join(save_dir, 'labels'),

@@ -34,8 +34,13 @@ if __name__ == '__main__':
     model.to(device)
     model = torch.nn.DataParallel(model)
 
+    height, width = 512, 512
+    diagonal = int((height ** 2 + width ** 2) ** 0.5)
+    padding = (diagonal - height) // 2, (diagonal - width) // 2
+
     transforms = transforms.Compose([
         transforms.ToTensor(),
+        transforms.Pad(padding),
         transforms.Resize((256, 256), antialias=True),
         transforms.Normalize(mean=[.5], std=[.5]),
     ])
@@ -64,8 +69,10 @@ if __name__ == '__main__':
             loss = F.nll_loss(pred, label, reduction='sum')
             test_loss += loss
 
-            pred = pred.argmax(dim=1, keepdim=True)
+            pred = pred.argmax(dim=1)
             correct += pred.eq(label).sum().item()
+
+    pdb.set_trace()
 
     print(f'loss: {loss}')
     print(f'accuracy: {correct / len(dataset)}')
